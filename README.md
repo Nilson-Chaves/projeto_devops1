@@ -72,16 +72,15 @@ Este projeto visa aplicar conceitos de **Infraestrutura como Código (IaC)** e a
 ```bash
 projeto_devops/
 ├── ansible/
-│   ├── inventory.ini
 │   ├── comum-playbook.yml
 │   ├── arq-playbook.yml
 │   ├── db-playbook.yml
 │   ├── app-playbook.yml
 │   ├── cli-playbook.yml
+│   ├── inventory.ini
 │   └── keys/
-│       ├── nilson.pub
-│       └── wellington.pub
-├── vm/
-│   └── Vagrantfile
+├── .vagrant/           # Discos dinâmicos criados para a VM 'arq'
+├── Vagrantfile         # Define as VMs e provisionamento
 └── README.md
+
 
