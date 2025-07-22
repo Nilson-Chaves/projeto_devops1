@@ -1,45 +1,86 @@
 Vagrant.configure("2") do |config|
+  config.vbguest.auto_update = false
   config.vm.box = "debian/bookworm64"
-  config.vm.provider "virtualbox" do |vb|
-    vb.linked_clone = true
-  end
-
+  config.vm.synced_folder "ansible", "/vagrant/ansible"
   config.ssh.insert_key = false
-  config.vm.synced_folder ".", "/vagrant", disabled: true
-  config.vbguest.auto_update = false if Vagrant.has_plugin?("vagrant-vbguest")
 
-  nodes = [
-    { name: "arq", ip: "192.168.56.102", ram: 512 },
-    { name: "db",  ip: nil,            ram: 512 },
-    { name: "app", ip: nil,            ram: 512 },
-    { name: "cli", ip: nil,            ram: 1024 }
-  ]
+  # Definições das máquinas virtuais
+  {
+    "arq" => {
+      hostname: "arq.nilson.wellington.devops",
+      ip: "192.168.56.102",
+      ram: 512,
+      cpus: 1,
+      disks: 3,
+      playbooks: ["comum-playbook.yml", "arq-playbook.yml"]
+    },
+    "db" => {
+      hostname: "db.nilson.wellington.devops",
+      ip: nil,
+      ram: 512,
+      cpus: 1,
+      playbooks: ["comum-playbook.yml", "db-playbook.yml"]
+    },
+    "app" => {
+      hostname: "app.nilson.wellington.devops",
+      ip: nil,
+      ram: 512,
+      cpus: 1,
+      playbooks: ["comum-playbook.yml", "app-playbook.yml"]
+    },
+    "cli" => {
+      hostname: "cli.nilson.wellington.devops",
+      ip: nil,
+      ram: 1024,
+      cpus: 1,
+      playbooks: ["comum-playbook.yml", "cli-playbook.yml"]
+    }
+  }.each do |name, opts|
+    config.vm.define name do |node_config|
+      node_config.vm.hostname = opts[:hostname]
 
-  nodes.each do |node|
-    config.vm.define node[:name] do |node_config|
-      node_config.vm.hostname = "#{node[:name]}.nilson.wellington.devops"
+      # Configuração de rede: IP fixo ou DHCP
+      if opts[:ip]
+        node_config.vm.network "private_network", ip: opts[:ip]
+      else
+        node_config.vm.network "private_network", type: "dhcp"
+      end
+
+      # Recursos da VM (RAM e CPU)
       node_config.vm.provider "virtualbox" do |vb|
-        vb.memory = node[:ram]
+        vb.memory = opts[:ram]
+        vb.cpus = opts[:cpus]
+        vb.linked_clone = true
+      end
 
-        # Adiciona discos somente para "arq"
-        if node[:name] == "arq"
-          (1..3).each do |i|
-            disk_path = File.expand_path("../../discos/disk#{i}.vdi", __FILE__)
-            unless File.exist?(disk_path)
-              system("VBoxManage createhd --filename #{disk_path} --size 10240")
-            end
-            vb.customize ["storageattach", :id, "--storagectl", "SATA Controller", "--port", i, "--device", 0, "--type", "hdd", "--medium", disk_path]
+      # Discos adicionais para a VM arq (armazenados em .vagrant/)
+      if name == "arq" && opts[:disks]
+        (1..opts[:disks]).each do |i|
+          disk_path = ".vagrant/arq_disk#{i}.vdi"
+          unless File.exist?(disk_path)
+            system("VBoxManage createmedium disk --filename #{disk_path} --size 10240 --format VDI --variant Standard")
+          end
+          node_config.vm.provider "virtualbox" do |vb|
+            vb.customize [
+              "storageattach", :id,
+              "--storagectl", "SATA Controller",
+              "--port", i,
+              "--device", 0,
+              "--type", "hdd",
+              "--medium", File.expand_path(disk_path)
+            ]
           end
         end
       end
 
-      # Define IP fixo para arq, os demais pegam por DHCP
-      if node[:ip]
-        node_config.vm.network "private_network", ip: node[:ip]
-      else
-        node_config.vm.network "private_network", type: "dhcp"
+      # Provisionamento com Ansible Local (um playbook por máquina)
+      opts[:playbooks].each do |playbook|
+        node_config.vm.provision "ansible_local" do |ansible|
+          ansible.playbook = "/vagrant/ansible/#{playbook}"
+        end
       end
     end
   end
 end
+
 
