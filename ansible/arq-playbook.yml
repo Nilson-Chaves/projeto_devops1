@@ -1,0 +1,135 @@
+---
+- name: Configuração do servidor ARQ
+  hosts: arq
+  become: yes
+  vars:
+    dominio: "nilson.wellington.devops"
+    dns_servers:
+      - 1.1.1.1
+      - 8.8.8.8
+    ip_reservado_db: 192.168.56.27
+    mac_db: "08:00:27:12:9e:f3"
+    ip_reservado_app: 192.168.56.28
+    mac_app: "08:00:27:d4:19:65"
+    vg_name: dados
+    lv_name: ifpb
+    mount_point: /dados
+    lv_size: 15G
+
+  tasks:
+    - name: Instalar pacotes necessários
+      apt:
+        name:
+          - isc-dhcp-server
+          - nfs-kernel-server
+          - lvm2
+        state: present
+        update_cache: yes
+
+    - name: Configurar DHCP
+      copy:
+        dest: /etc/dhcp/dhcpd.conf
+        content: |
+          option domain-name "{{ dominio }}";
+          option domain-name-servers {{ dns_servers | join(", ") }};
+          default-lease-time 600;
+          max-lease-time 7200;
+          authoritative;
+
+          subnet 192.168.56.0 netmask 255.255.255.0 {
+            range 192.168.56.50 192.168.56.100;
+            option routers 192.168.56.1;
+          }
+
+          host db {
+            hardware ethernet {{ mac_db }};
+            fixed-address {{ ip_reservado_db }};
+          }
+
+          host app {
+            hardware ethernet {{ mac_app }};
+            fixed-address {{ ip_reservado_app }};
+          }
+
+    - name: Definir interface para o DHCP
+      lineinfile:
+        path: /etc/default/isc-dhcp-server
+        regexp: '^INTERFACESv4='
+        line: 'INTERFACESv4="eth1"'
+
+    - name: Habilitar e iniciar DHCP
+      service:
+        name: isc-dhcp-server
+        enabled: yes
+        state: restarted
+
+    - name: Criar volume físico nos discos
+      shell: |
+        pvcreate /dev/sdb /dev/sdc /dev/sdd
+      args:
+        creates: /dev/dados
+
+    - name: Criar volume group
+      shell: vgcreate {{ vg_name }} /dev/sdb /dev/sdc /dev/sdd
+      args:
+        creates: "/dev/{{ vg_name }}"
+
+    - name: Criar logical volume
+      shell: lvcreate -n {{ lv_name }} -L {{ lv_size }} {{ vg_name }}
+      args:
+        creates: "/dev/{{ vg_name }}/{{ lv_name }}"
+
+    - name: Formatar LV com ext4
+      filesystem:
+        fstype: ext4
+        dev: "/dev/{{ vg_name }}/{{ lv_name }}"
+
+    - name: Criar ponto de montagem
+      file:
+        path: "{{ mount_point }}"
+        state: directory
+
+    - name: Montar partição
+      mount:
+        path: "{{ mount_point }}"
+        src: "/dev/{{ vg_name }}/{{ lv_name }}"
+        fstype: ext4
+        state: mounted
+
+    - name: Adicionar entrada ao fstab
+      mount:
+        path: "{{ mount_point }}"
+        src: "/dev/{{ vg_name }}/{{ lv_name }}"
+        fstype: ext4
+        opts: defaults
+        state: present
+
+    - name: Criar usuário nfs-ifpb sem shell
+      user:
+        name: nfs-ifpb
+        shell: /usr/sbin/nologin
+        system: yes
+        create_home: no
+
+    - name: Criar subdiretório NFS
+      file:
+        path: "{{ mount_point }}/nfs"
+        state: directory
+        owner: nfs-ifpb
+        group: nfs-ifpb
+        mode: "0755"
+
+
+    - name: Configurar exportações NFS
+      copy:
+        dest: /etc/exports
+        content: |
+          {{ mount_point }}/nfs 192.168.56.0/24(rw,sync,no_subtree_check,all_squash,anonuid=65534,anongid=65534)
+
+
+    - name: Reiniciar NFS
+      service:
+        name: nfs-kernel-server
+        enabled: yes
+        state: restarted
+

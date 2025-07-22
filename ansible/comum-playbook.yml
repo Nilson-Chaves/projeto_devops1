@@ -1,0 +1,116 @@
+---
+- name: Configurações comuns para todas as VMs
+  hosts: all
+  become: yes
+  vars:
+    timezone: America/Recife
+    ntp_server: pool.ntp.br
+    grupo_ifpb: ifpb
+    usuarios:
+      - { nome: "nilson", senha: "$6$rounds=100000$senha1234HASH" }
+      - { nome: "wellington", senha: "$6$rounds=100000$senha1234HASH" }
+    ssh_banner: |
+      Acesso apenas para pessoas com autorização expressa.
+      Seu acesso está sendo monitorado !!!
+    ssh_permitidos: "AllowGroups vagrant ifpb"
+
+  tasks:
+    - name: Atualizar pacotes
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Instalar pacotes necessários
+      apt:
+        name:
+          - chrony
+          - sudo
+          - nfs-common
+          - openssh-server
+        state: present
+
+    - name: Configurar timezone
+      timezone:
+        name: "{{ timezone }}"
+
+    - name: Configurar NTP com chrony
+      lineinfile:
+        path: /etc/chrony/chrony.conf
+        regexp: '^pool '
+        line: "pool {{ ntp_server }} iburst"
+        state: present
+      notify: restart chrony
+
+    - name: Garantir que o chrony está ativado e rodando
+      service:
+        name: chrony
+        enabled: yes
+        state: started
+
+    - name: Criar grupo ifpb
+      group:
+        name: "{{ grupo_ifpb }}"
+        state: present
+
+    - name: Criar usuários do projeto
+      user:
+        name: "{{ item.nome }}"
+        groups: "{{ grupo_ifpb }}"
+        shell: /bin/bash
+        password: "{{ item.senha }}"
+        state: present
+      loop: "{{ usuarios }}"
+
+    - name: Permitir sudo para grupo ifpb
+      lineinfile:
+        path: /etc/sudoers
+        line: "%{{ grupo_ifpb }} ALL=(ALL) NOPASSWD: ALL"
+        validate: '/usr/sbin/visudo -cf %s'
+
+    - name: Configurar SSH - banner
+      copy:
+        dest: /etc/issue.net
+        content: "{{ ssh_banner }}"
+
+    - name: Habilitar banner no SSH
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^Banner'
+        line: "Banner /etc/issue.net"
+
+    - name: Desabilitar login root via SSH
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PermitRootLogin'
+        line: "PermitRootLogin no"
+
+    - name: Habilitar somente autenticação por chave pública
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PasswordAuthentication'
+        line: "PasswordAuthentication no"
+
+    - name: Permitir login apenas para grupos vagrant e ifpb
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^AllowGroups'
+        line: "{{ ssh_permitidos }}"
+
+    - name: Criar .ssh e authorized_keys para usuários do projeto
+      authorized_key:
+        user: "{{ item.nome }}"
+        key: "{{ lookup('file', 'keys/' + item.nome + '.pub') }}"
+        state: present
+      loop: "{{ usuarios }}"
+
+    - name: Reiniciar SSH
+      service:
+        name: ssh
+        state: restarted
+
+  handlers:
+    - name: restart chrony
+      service:
+        name: chrony
+        state: restarted
+

@@ -1,0 +1,42 @@
+---
+- name: Configuração do servidor DB
+  hosts: db
+  become: yes
+  vars:
+    nfs_server: 192.168.56.102
+    nfs_origem: "/dados/nfs"
+    nfs_destino: "/var/nfs"
+
+  tasks:
+    - name: Instalar pacotes necessários
+      apt:
+        name:
+          - mariadb-server
+          - autofs
+          - nfs-common
+        state: present
+        update_cache: yes
+
+    - name: Criar ponto de montagem do NFS
+      file:
+        path: "{{ nfs_destino }}"
+        state: directory
+
+    - name: Configurar auto.master
+      copy:
+        dest: /etc/auto.master.d/nfs.autofs
+        content: |
+          {{ nfs_destino }} /etc/auto.nfs
+
+    - name: Configurar auto.nfs
+      copy:
+        dest: /etc/auto.nfs
+        content: |
+          nfs -rw,sync {{ nfs_server }}:{{ nfs_origem }}
+
+    - name: Reiniciar serviço autofs
+      service:
+        name: autofs
+        state: restarted
+        enabled: yes
+

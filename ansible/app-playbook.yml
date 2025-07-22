@@ -1,0 +1,76 @@
+---
+- name: Configuração do servidor APP
+  hosts: app
+  become: yes
+  vars:
+    nfs_server: 192.168.56.102
+    nfs_origem: "/dados/nfs"
+    nfs_destino: "/var/nfs"
+    index_html: |
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Projeto DevOps - IFPB</title>
+      </head>
+      <body>
+        <h1>Projeto 01 - DevOps com Vagrant e Ansible</h1>
+        <p><strong>Disciplina:</strong> Administração de Sistemas Abertos</p>
+        <p><strong>Professor:</strong> Leonidas Lima</p>
+        <p><strong>Período:</strong> 2025.1</p>
+        <p><strong>Integrantes:</strong></p>
+        <ul>
+          <li>Nilson - 20221380002</li>
+          <li>Wellington - 20221380031</li>
+        </ul>
+        <p>Este projeto configura uma infraestrutura virtual automatizada com Vagrant e Ansible.</p>
+      </body>
+      </html>
+
+  tasks:
+    - name: Instalar pacotes necessários
+      apt:
+        name:
+          - apache2
+          - autofs
+          - nfs-common
+        state: present
+        update_cache: yes
+
+    - name: Garantir que o Apache está habilitado e ativo
+      service:
+        name: apache2
+        state: started
+        enabled: yes
+
+    - name: Criar arquivo index.html personalizado
+      copy:
+        dest: /var/www/html/index.html
+        content: "{{ index_html }}"
+        owner: www-data
+        group: www-data
+        mode: "0644"
+
+    - name: Criar diretório para montagem NFS
+      file:
+        path: "{{ nfs_destino }}"
+        state: directory
+
+    - name: Configurar auto.master
+      copy:
+        dest: /etc/auto.master.d/nfs.autofs
+        content: |
+          {{ nfs_destino }} /etc/auto.nfs
+
+    - name: Configurar auto.nfs
+      copy:
+        dest: /etc/auto.nfs
+        content: |
+          nfs -rw,sync {{ nfs_server }}:{{ nfs_origem }}
+
+    - name: Reiniciar autofs
+      service:
+        name: autofs
+        state: restarted
+        enabled: yes
+
