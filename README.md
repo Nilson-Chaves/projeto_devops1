@@ -8,7 +8,7 @@
 ## 👥 Integrantes
 
 - **Nilson Vinícius Aurélio Chaves** — 20221380002
-- **Wellington [Sobrenome Não Informado]** — 20221380031
+- **Wellington Antonio da Silva** — 20221380031
 
 ---
 
